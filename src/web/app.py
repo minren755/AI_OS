@@ -65,6 +65,65 @@ def main_app():
     return render_template_string(HTML_TEMPLATE)
 
 
+@app.route('/test')
+def test_page():
+    """交互测试页面"""
+    from flask import render_template
+    return render_template('test_interactive.html')
+
+
+@app.route('/api/test/check', methods=['POST'])
+def test_check():
+    """测试专用API（无需登录）"""
+    data = request.json
+    topic = data.get('topic', '').strip()
+    
+    if not topic:
+        return jsonify({"error": "请输入主题"}), 400
+    
+    # ===== 方案B：信息完整性检查 =====
+    from execution.info_checker import check_and_ask
+    info_check = check_and_ask(topic)
+    
+    if info_check["need_input"]:
+        return jsonify({
+            "status": "need_input",
+            "questions": info_check["questions"],
+            "prompt": info_check["prompt"],
+            "missing": info_check["missing"]
+        })
+    else:
+        return jsonify({
+            "status": "ok",
+            "message": "信息完整，可以直接讨论"
+        })
+
+
+@app.route('/api/test/continue', methods=['POST'])
+def test_continue():
+    """测试继续API（无需登录）"""
+    data = request.json
+    topic = data.get('topic', '').strip()
+    user_input = data.get('user_input', '').strip()
+    
+    # 合并主题和用户补充
+    if user_input and user_input != "继续":
+        enhanced_topic = topic + "\n\n用户补充信息：" + user_input
+    else:
+        enhanced_topic = topic
+    
+    # 再次检查信息完整性
+    from execution.info_checker import check_and_ask
+    info_check = check_and_ask(enhanced_topic)
+    
+    return jsonify({
+        "status": "ready",
+        "enhanced_topic": enhanced_topic,
+        "info_complete": not info_check["need_input"],
+        "message": "信息已补充，可以开始讨论（需登录后调用/api/start）"
+    })
+
+
 # ============================================
 # 认证API
 # ============================================
@@ -224,6 +283,19 @@ def start_discussion():
     if not topic:
         return jsonify({"error": "请输入议题"}), 400
     
+    # ===== 方案B：信息完整性检查 =====
+    from execution.info_checker import check_and_ask
+    info_check = check_and_ask(topic)
+    
+    if info_check["need_input"]:
+        # 返回需要补充的问题，不扣额度
+        return jsonify({
+            "status": "need_input",
+            "questions": info_check["questions"],
+            "prompt": info_check["prompt"],
+            "missing": info_check["missing"]
+        })
+    
     # 扣减额度
     if not use_credit(request.user_id):
         return jsonify({"error": "额度不足"}), 403
@@ -343,6 +415,125 @@ def start_discussion():
     thread.start()
     
     return jsonify({
+        "status": "started",
+        "session_key": session_key,
+        "credits_remaining": get_credits(request.user_id)
+    })
+
+
+@app.route('/api/continue', methods=['POST'])
+@require_auth
+def continue_discussion():
+    """用户回答后继续讨论（方案B）"""
+    data = request.json
+    topic = data.get('topic', '').strip()
+    user_input = data.get('user_input', '').strip()
+    max_rounds = data.get('max_rounds', 3)
+    
+    if not topic:
+        return jsonify({"error": "请输入议题"}), 400
+    
+    # 合并主题和用户补充
+    if user_input and user_input != "继续":
+        enhanced_topic = topic + "\n\n用户补充信息：" + user_input
+    else:
+        enhanced_topic = topic
+    
+    # 扣减额度
+    if not use_credit(request.user_id):
+        return jsonify({"error": "额度不足"}), 403
+    
+    # 生成session key
+    session_key = f"{request.user_id}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    
+    # 初始化讨论状态
+    current_discussions[session_key] = {
+        "running": True,
+        "topic": enhanced_topic,
+        "user_id": request.user_id,
+        "events": [{"type": "input_received", "input": user_input, "time": datetime.now().strftime("%H:%M:%S")}],
+        "round": 0,
+        "agents": {
+            "CEO": {"status": "等待中", "content": "", "satisfied": False},
+            "CFO": {"status": "等待中", "content": "", "satisfied": False},
+            "CTO": {"status": "等待中", "content": "", "satisfied": False},
+            "CMO": {"status": "等待中", "content": "", "satisfied": False}
+        },
+        "history": [],
+        "consensus": False
+    }
+    
+    # 后台执行讨论（同start_discussion逻辑）
+    def emit_event(event_dict):
+        event_dict["time"] = datetime.now().strftime("%H:%M:%S")
+        current_discussions[session_key]["events"].append(event_dict)
+        
+        event_type = event_dict.get("type", "")
+        if event_type == "agent_start":
+            agent = event_dict.get("agent", "")
+            if agent in current_discussions[session_key]["agents"]:
+                current_discussions[session_key]["agents"][agent]["status"] = "发言中..."
+        elif event_type == "agent_done":
+            agent = event_dict.get("agent", "")
+            content = event_dict.get("content", "")
+            satisfied = event_dict.get("satisfied", False)
+            skipped = event_dict.get("skipped", False)
+            if agent in current_discussions[session_key]["agents"]:
+                current_discussions[session_key]["agents"][agent]["status"] = "完成"
+                current_discussions[session_key]["agents"][agent]["content"] = content
+                current_discussions[session_key]["agents"][agent]["satisfied"] = satisfied
+            current_discussions[session_key]["history"].append({
+                "round": current_discussions[session_key]["round"],
+                "agent": agent, "content": content,
+                "satisfied": satisfied, "skipped": skipped,
+                "time": datetime.now().strftime("%H:%M:%S")
+            })
+        elif event_type == "ceo_summary":
+            current_discussions[session_key]["history"].append({
+                "round": "总结", "agent": "CEO",
+                "content": event_dict.get("content", ""),
+                "time": datetime.now().strftime("%H:%M:%S")
+            })
+        elif event_type == "round_start":
+            current_discussions[session_key]["round"] = event_dict.get("round", 0)
+        elif event_type == "consensus":
+            current_discussions[session_key]["consensus"] = True
+    
+    async def run_discussion_async():
+        config = DiscussionConfig(max_rounds=max_rounds)
+        engine = DiscussionEngine(config)
+        engine.on_event = emit_event
+        try:
+            result = await engine.run(enhanced_topic)
+            discussion_id = save_discussion(
+                user_id=request.user_id, topic=enhanced_topic,
+                result=result, rounds=result.get("总轮数", 0),
+                consensus=result.get("共识达成", False)
+            )
+            for h in current_discussions[session_key]["history"]:
+                save_message(
+                    discussion_id=discussion_id,
+                    round=h.get("round", 0) if isinstance(h.get("round"), int) else 0,
+                    agent=h.get("agent", ""), content=h.get("content", ""),
+                    satisfied=h.get("satisfied", False), skipped=h.get("skipped", False)
+                )
+            emit_event({"type": "end", "result": result})
+        except Exception as e:
+            emit_event({"type": "error", "message": str(e)})
+        finally:
+            current_discussions[session_key]["running"] = False
+    
+    loop = asyncio.new_event_loop()
+    import threading
+    def run_in_thread():
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(run_discussion_async())
+    
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+    
+    return jsonify({
+        "status": "started",
         "session_key": session_key,
         "credits_remaining": get_credits(request.user_id)
     })
@@ -898,13 +1089,15 @@ function switchTab(tab) {
 
 // ========== 讨论 ==========
 
+let pendingTopic = '';  // 保存待补充信息的主题
+
 async function startDiscussion() {
     const topic = document.getElementById('topicInput').value.trim();
     if (!topic) return;
     
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
-    btn.textContent = '讨论中...';
+    btn.textContent = '检查中...';
     
     // 重置UI
     resetDiscussionUI();
@@ -917,6 +1110,87 @@ async function startDiscussion() {
                 'Authorization': 'Bearer ' + authToken
             },
             body: JSON.stringify({topic})
+        });
+        const data = await resp.json();
+        
+        if (resp.ok) {
+            // ===== 方案B：检查是否需要交互 =====
+            if (data.status === 'need_input') {
+                // 显示交互表单
+                pendingTopic = topic;
+                showInputForm(data.questions, data.prompt);
+                btn.disabled = false;
+                btn.textContent = '开始讨论';
+            } else {
+                // 直接开始讨论
+                currentSessionKey = data.session_key;
+                document.getElementById('userCredits').textContent = data.credits_remaining + '次';
+                lastIndex = 0;
+                pollEvents();
+            }
+        } else {
+            alert(data.error);
+            btn.disabled = false;
+            btn.textContent = '开始讨论';
+        }
+    } catch(e) {
+        alert('网络错误');
+        btn.disabled = false;
+        btn.textContent = '开始讨论';
+    }
+}
+
+function showInputForm(questions, prompt) {
+    // 创建交互表单
+    const formHtml = `
+        <div id="inputFormModal" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:9999;">
+            <div style="background:#1a1a2e;padding:32px;border-radius:16px;max-width:500px;width:90%;border:1px solid #2a2a4a;">
+                <h3 style="color:#4cc9f0;margin-bottom:16px;">需要补充信息</h3>
+                <p style="color:#aaa;font-size:14px;margin-bottom:20px;">${prompt}</p>
+                <textarea id="userInputArea" style="width:100%;height:120px;background:#0a0a1a;border:1px solid #2a2a4a;border-radius:8px;color:#fff;padding:12px;font-size:14px;resize:none;" placeholder="请回答以上问题，或直接说「继续」跳过..."></textarea>
+                <div style="display:flex;gap:12px;margin-top:20px;">
+                    <button onclick="submitUserInput()" style="flex:1;padding:12px;background:#4cc9f0;color:#000;border:none;border-radius:8px;font-weight:bold;cursor:pointer;">提交并继续</button>
+                    <button onclick="skipInput()" style="flex:1;padding:12px;background:#333;color:#fff;border:none;border-radius:8px;cursor:pointer;">跳过</button>
+                    <button onclick="closeInputForm()" style="padding:12px 20px;background:none;border:1px solid #666;color:#aaa;border-radius:8px;cursor:pointer;">取消</button>
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', formHtml);
+}
+
+function closeInputForm() {
+    const modal = document.getElementById('inputFormModal');
+    if (modal) modal.remove();
+    pendingTopic = '';
+}
+
+async function submitUserInput() {
+    const userInput = document.getElementById('userInputArea').value.trim();
+    if (!userInput) {
+        alert('请回答问题或点击跳过');
+        return;
+    }
+    
+    // 先保存主题，再关闭表单
+    const topic = pendingTopic;
+    closeInputForm();
+    
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    btn.textContent = '讨论中...';
+    
+    try {
+        const resp = await fetch('/api/continue', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken
+            },
+            body: JSON.stringify({
+                topic: topic,
+                user_input: userInput
+            })
         });
         const data = await resp.json();
         
@@ -935,6 +1209,11 @@ async function startDiscussion() {
         btn.disabled = false;
         btn.textContent = '开始讨论';
     }
+}
+
+function skipInput() {
+    document.getElementById('userInputArea').value = '继续';
+    submitUserInput();
 }
 
 function resetDiscussionUI() {
