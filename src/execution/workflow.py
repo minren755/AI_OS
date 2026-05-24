@@ -58,7 +58,7 @@ class WorkflowEngine:
     
     def _init_llm_configs(self):
         """加载LLM配置"""
-        from ..config.settings import get_llm_config
+        from config.settings import get_llm_config
         
         llm_config = get_llm_config()
         if llm_config.get('api_key'):
@@ -118,14 +118,79 @@ class WorkflowEngine:
         
         return decision
     
-    # ========== Phase 2: 管理层拆解 ==========
+    # ========== Phase 2: 管理层拆解（P0两阶段拆解）==========
     
     async def _run_planning_phase(self, decision: str) -> List[Task]:
-        """PM拆解决策为任务"""
+        """PM两阶段拆解：先拆模块，再拆任务"""
         
-        prompt = f"""你是PM（产品经理），需要将以下决策拆解为具体可执行的任务。
+        self._emit("planning_start", {"decision": decision})
+        
+        # ===== Phase 2.1: 拆大模块（做什么）=====
+        modules = await self._plan_modules(decision)
+        self._emit("modules_created", {"modules": modules})
+        
+        # ===== Phase 2.2: 每模块拆子任务（怎么做）=====
+        all_tasks = []
+        for module in modules:
+            tasks = await self._plan_module_tasks(module, decision)
+            all_tasks.extend(tasks)
+            self._emit("module_tasks_created", {"module": module["name"], "tasks": len(tasks)})
+        
+        # 建立跨模块依赖关系
+        all_tasks = self._link_cross_module_deps(all_tasks, modules)
+        
+        # 按优先级排序
+        all_tasks.sort(key=lambda t: t.priority, reverse=True)
+        
+        self._emit("tasks_created", {"total_tasks": len(all_tasks)})
+        
+        return all_tasks
+    
+    async def _plan_modules(self, decision: str) -> List[Dict]:
+        """Phase 2.1: 拆大模块"""
+        
+        prompt = f"""你是资深PM，需要将以下决策拆解为功能模块。
 
 决策：{decision}
+
+请输出JSON格式模块列表：
+[
+  {{
+    "name": "模块名称",
+    "description": "模块功能概述",
+    "priority": 1-5,
+    "estimated_tasks": 3
+  }}
+]
+
+要求：
+1. 模块粒度适中（每个模块3-5个任务）
+2. 模块之间相对独立，减少依赖
+3. 按实现优先级排序
+4. 只输出JSON，不要解释
+"""
+        
+        raw = await self._call_llm("PM", prompt)
+        modules = self._parse_modules(raw)
+        
+        if not modules:
+            # fallback默认模块
+            modules = [
+                {"name": "核心功能", "description": "实现核心业务逻辑", "priority": 5, "estimated_tasks": 3},
+                {"name": "用户界面", "description": "前端展示和交互", "priority": 4, "estimated_tasks": 2},
+                {"name": "测试验证", "description": "功能测试和质量保证", "priority": 3, "estimated_tasks": 2},
+            ]
+        
+        return modules
+    
+    async def _plan_module_tasks(self, module: Dict, decision: str) -> List[Task]:
+        """Phase 2.2: 每个模块拆具体任务"""
+        
+        prompt = f"""你是资深PM，需要将以下模块拆解为具体可执行的任务。
+
+模块：{module['name']}
+模块描述：{module['description']}
+整体决策：{decision}
 
 可用Agent及其能力：
 - Developer: 写代码、部署、查文档（工具：terminal, write_file, execute_code）
@@ -137,34 +202,36 @@ class WorkflowEngine:
 [
   {{
     "name": "任务名称",
-    "description": "详细描述，包含验收标准",
+    "description": "详细描述",
+    "acceptance_criteria": ["验收条件1", "验收条件2"],
     "assignee": "Developer",
     "priority": 1-5,
-    "dependencies": [],
-    "tools_needed": ["terminal", "write_file"]
+    "estimated_steps": 3,
+    "tools_needed": ["terminal", "write_file"],
+    "context_files": ["可能需要的文件路径"]
   }}
 ]
 
 要求：
-1. 每个任务必须只分配给一个Agent
-2. 任务之间如果有依赖，填写dependencies（任务名）
-3. 按优先级排序
-4. 任务描述要具体，包含可执行的细节
+1. 每个任务有明确的验收标准（可测试）
+2. estimated_steps表示预计执行步骤数
+3. context_files列出可能需要的上下文文件
+4. 优先级继承模块优先级
+5. 只输出JSON，不要解释
 """
         
         raw = await self._call_llm("PM", prompt)
-        tasks = self._parse_tasks(raw, decision)
+        tasks = self._parse_module_tasks(raw, module)
         
-        self._emit("tasks_created", {"tasks": [{"name": t.name, "assignee": t.assignee} for t in tasks]})
+        if not tasks:
+            # fallback默认任务
+            tasks = self._default_module_tasks(module)
         
         return tasks
     
-    def _parse_tasks(self, raw: str, decision: str) -> List[Task]:
-        """解析LLM输出的任务列表"""
-        tasks = []
-        
+    def _parse_modules(self, raw: str) -> List[Dict]:
+        """解析模块列表"""
         try:
-            # 提取JSON
             if "```json" in raw:
                 start = raw.find("```json") + 7
                 end = raw.find("```", start)
@@ -174,47 +241,105 @@ class WorkflowEngine:
                 end = raw.rfind("]") + 1
                 json_str = raw[start:end]
             else:
-                # 无法解析，生成默认任务
-                return self._default_tasks(decision)
+                return []
+            
+            return json.loads(json_str)
+        except:
+            return []
+    
+    def _parse_module_tasks(self, raw: str, module: Dict) -> List[Task]:
+        """解析模块任务列表（P0增强版）"""
+        tasks = []
+        
+        try:
+            if "```json" in raw:
+                start = raw.find("```json") + 7
+                end = raw.find("```", start)
+                json_str = raw[start:end].strip()
+            elif "[" in raw and "]" in raw:
+                start = raw.find("[")
+                end = raw.rfind("]") + 1
+                json_str = raw[start:end]
+            else:
+                return []
             
             parsed = json.loads(json_str)
             
+            module_prefix = module["name"][:4].upper()
+            
             for i, t in enumerate(parsed):
                 task = Task(
-                    id=f"task_{i+1}",
+                    id=f"{module_prefix}_{i+1}",
                     name=t.get("name", f"任务{i+1}"),
                     description=t.get("description", ""),
                     assignee=t.get("assignee"),
-                    priority=t.get("priority", 3),
-                    dependencies=t.get("dependencies", []),
-                    tools_needed=t.get("tools_needed", [])
+                    priority=t.get("priority", module.get("priority", 3)),
+                    dependencies=[],  # 模块内依赖在后面处理
+                    tools_needed=t.get("tools_needed", []),
+                    acceptance_criteria=t.get("acceptance_criteria", []),
+                    estimated_steps=t.get("estimated_steps", 3),
+                    context_files=t.get("context_files", []),
+                    module=module["name"]
                 )
                 tasks.append(task)
+            
+            # 模块内按顺序建立依赖
+            for i in range(1, len(tasks)):
+                if tasks[i].assignee != tasks[i-1].assignee or tasks[i].priority > tasks[i-1].priority:
+                    # 不同Agent或高优先级任务，依赖前一个
+                    tasks[i].dependencies.append(tasks[i-1].id)
                 
         except Exception as e:
             print(f"解析任务失败: {e}")
-            tasks = self._default_tasks(decision)
+            tasks = self._default_module_tasks(module)
         
         return tasks
     
-    def _default_tasks(self, decision: str) -> List[Task]:
-        """默认任务（LLM解析失败时使用）"""
+    def _default_module_tasks(self, module: Dict) -> List[Task]:
+        """模块默认任务"""
+        module_prefix = module["name"][:4].upper()
         return [
-            Task(id="task_1", name="技术方案设计", description=decision,
-                 assignee="Developer", priority=5, tools_needed=["terminal", "write_file"]),
-            Task(id="task_2", name="UI设计", description="根据功能设计UI",
-                 assignee="Designer", priority=4, dependencies=["task_1"],
-                 tools_needed=["image_generate", "write_file"]),
-            Task(id="task_3", name="功能开发", description="实现功能代码",
-                 assignee="Developer", priority=5, dependencies=["task_1", "task_2"],
+            Task(id=f"{module_prefix}_1", name="设计方案", description=module["description"],
+                 assignee="Developer", priority=module.get("priority", 3), 
+                 acceptance_criteria=["方案文档完成"], module=module["name"],
+                 tools_needed=["terminal", "write_file"]),
+            Task(id=f"{module_prefix}_2", name="实现功能", description="代码实现",
+                 assignee="Developer", priority=module.get("priority", 3), 
+                 dependencies=[f"{module_prefix}_1"],
+                 acceptance_criteria=["功能可用"], module=module["name"],
                  tools_needed=["terminal", "write_file", "execute_code"]),
-            Task(id="task_4", name="测试", description="功能测试",
-                 assignee="QA", priority=4, dependencies=["task_3"],
+            Task(id=f"{module_prefix}_3", name="验证测试", description="功能验证",
+                 assignee="QA", priority=module.get("priority", 3)-1, 
+                 dependencies=[f"{module_prefix}_2"],
+                 acceptance_criteria=["测试通过"], module=module["name"],
                  tools_needed=["terminal", "execute_code"]),
-            Task(id="task_5", name="运营推广", description="发布和推广",
-                 assignee="Operator", priority=3, dependencies=["task_4"],
-                 tools_needed=["send_message", "image_generate"]),
         ]
+    
+    def _link_cross_module_deps(self, all_tasks: List[Task], modules: List[Dict]) -> List[Task]:
+        """建立跨模块依赖关系"""
+        # 按模块优先级建立依赖链
+        module_order = [m["name"] for m in sorted(modules, key=lambda m: m["priority"], reverse=True)]
+        
+        # 找每个模块的第一个任务
+        module_first_tasks = {}
+        for task in all_tasks:
+            if task.module not in module_first_tasks:
+                module_first_tasks[task.module] = task
+        
+        # 高优先级模块完成后，低优先级模块才能开始
+        for i in range(1, len(module_order)):
+            prev_module = module_order[i-1]
+            curr_module = module_order[i]
+            
+            prev_tasks = [t for t in all_tasks if t.module == prev_module]
+            curr_first = module_first_tasks.get(curr_module)
+            
+            if prev_tasks and curr_first:
+                # 当前模块第一个任务依赖前一模块最后一个任务
+                last_prev = prev_tasks[-1]
+                curr_first.dependencies.append(last_prev.id)
+        
+        return all_tasks
     
     # ========== Phase 3: 执行层工作 ==========
     

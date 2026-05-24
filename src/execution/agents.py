@@ -45,7 +45,7 @@ class TaskStatus(Enum):
 
 @dataclass
 class Task:
-    """任务定义"""
+    """任务定义 - P0增强版"""
     id: str
     name: str
     description: str
@@ -54,6 +54,11 @@ class Task:
     priority: int = 1  # 1-5, 5最高
     dependencies: List[str] = field(default_factory=list)
     tools_needed: List[str] = field(default_factory=list)
+    # P0新增字段
+    acceptance_criteria: List[str] = field(default_factory=list)  # 验收标准
+    estimated_steps: int = 3  # 预计步骤数
+    context_files: List[str] = field(default_factory=list)  # 需要读取的文件
+    module: str = ""  # 所属模块
     result: Any = None
     error: str = None
 
