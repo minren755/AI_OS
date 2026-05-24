@@ -19,6 +19,7 @@ from execution.agents import (
 )
 from execution.dependency_inferrer import infer_dependencies
 from execution.tool_executor import ToolExecutor
+from execution.info_checker import check_and_ask
 
 
 class WorkflowEngine:
@@ -71,6 +72,12 @@ class WorkflowEngine:
         self.on_event: Callable = None
         self.workdir = workdir
         self.dry_run = dry_run
+        
+        # 交互状态（方案B）
+        self.waiting_for_input: bool = False
+        self.pending_questions: List[str] = []
+        self.user_responses: List[str] = []
+        self.original_topic: str = ""
     
     def _init_llm_configs(self):
         """加载LLM配置"""
@@ -85,6 +92,25 @@ class WorkflowEngine:
         """执行完整工作流：讨论 → 拆解 → 执行 → 反馈"""
         
         self._emit("workflow_start", {"topic": topic})
+        
+        # ===== 方案B：信息完整性检查 =====
+        info_check = check_and_ask(topic)
+        if info_check["need_input"]:
+            self.waiting_for_input = True
+            self.original_topic = topic
+            self.pending_questions = info_check["questions"]
+            
+            self._emit("need_input", {
+                "questions": info_check["questions"],
+                "prompt": info_check["prompt"],
+                "missing": info_check["missing"]
+            })
+            
+            return {
+                "状态": "等待用户输入",
+                "问题": info_check["questions"],
+                "提示": info_check["prompt"]
+            }
         
         # ========== Phase 1: 决策层讨论 ==========
         self._emit("phase", {"phase": "decision", "message": "决策层讨论中..."})
@@ -114,6 +140,31 @@ class WorkflowEngine:
             "执行结果": results,
             "反馈": feedback
         }
+    
+    async def continue_with_input(self, user_input: str) -> Dict:
+        """
+        用户输入后继续执行（方案B）
+        
+        Args:
+            user_input: 用户的回答，可以是单个字符串或多个问题的回答
+        """
+        if not self.waiting_for_input:
+            return {"错误": "当前不在等待输入状态"}
+        
+        # 记录用户回答
+        self.user_responses.append(user_input)
+        
+        # 合并原始主题和用户补充信息
+        enhanced_topic = self.original_topic
+        if user_input.strip() and user_input != "继续":
+            enhanced_topic += f"\n\n用户补充信息：{user_input}"
+        
+        # 重置状态
+        self.waiting_for_input = False
+        self._emit("input_received", {"input": user_input})
+        
+        # 继续执行工作流
+        return await self.run(enhanced_topic)
     
     # ========== Phase 1: 决策层讨论 ==========
     
