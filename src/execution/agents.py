@@ -258,8 +258,8 @@ class DeveloperAgent(BaseAgent):
         # 调用LLM获取计划
         # 返回示例
         return [
-            {"action": "terminal", "params": {"command": "echo 'Hello'"}},
-            {"action": "write_file", "params": {"path": "/tmp/test.js", "content": "console.log('test')"}}
+            {"action": "write_file", "params": {"path": f"{task.id}_app.js", "content": "console.log('Hello AI_OS!')"}},
+            {"action": "terminal", "params": {"command": f"echo 'Task {task.id} completed'"}}
         ]
     
     async def _execute_step(self, step: Dict) -> ToolResult:
@@ -333,17 +333,37 @@ class DesignerAgent(BaseAgent):
         html_content = f"""
 <!DOCTYPE html>
 <html>
-<head><title>{task.name}</title></head>
+<head>
+    <meta charset="UTF-8">
+    <title>{task.name}</title>
+    <style>
+        body {{ font-family: sans-serif; margin: 40px; }}
+        h1 {{ color: #4cc9f0; }}
+        img {{ max-width: 100%; }}
+    </style>
+</head>
 <body>
-  <h1>{task.name}</h1>
-  <img src="{design.output}">
+    <header>
+        <h1>公司宣传页</h1>
+        <p>现代简约风格设计</p>
+    </header>
+    <main>
+        <img src="{design.output}" alt="设计稿">
+        <h2>核心业务</h2>
+        <p>专业AI解决方案提供商</p>
+        <h2>联系方式</h2>
+        <p>Email: contact@company.com</p>
+    </main>
+    <footer>
+        <p>© 2026 AI创世者</p>
+    </footer>
 </body>
 </html>
 """
         
         if self.tool_executor:
             return await self.tool_executor("write_file", {
-                "path": f"/tmp/{task.id}.html",
+                "path": f"{task.id}_prototype.html",  # 相对路径，由workdir决定
                 "content": html_content
             })
         
