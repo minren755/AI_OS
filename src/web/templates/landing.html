@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI_OS - 多Agent协作技术验证项目</title>
+    <meta name="description" content="AI_OS是一个开源的多Agent协作技术验证项目，探索如何让多个AI Agent像团队一样协作完成任务。技术分享与学习交流。">
+    <meta name="keywords" content="AI, Agent, 多Agent, 协作, LangGraph, 开源项目, 技术验证, 学习交流">
+    <meta name="author" content="AI创世者">
+    <link rel="canonical" href="https://aicreator.ren/">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/favicon-32.png">
+    
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://aicreator.ren/">
+    <meta property="og:title" content="AI_OS - 多Agent协作技术验证项目">
+    <meta property="og:description" content="开源技术验证项目：探索多Agent协作的可能性">
+    <meta property="og:image" content="https://aicreator.ren/static/og-image.png">
+    <meta property="og:locale" content="zh_CN">
+    
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: #0a0a1a; 
+            color: #fff; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.6;
+        }
+        
+        /* 导航 */
+        .navbar {
+            background: rgba(26,26,46,0.95);
+            padding: 16px 48px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(76,201,240,0.1);
+        }
+        .navbar .brand { 
+            font-size: 26px; 
+            font-weight: bold; 
+            color: #4cc9f0; 
+            text-decoration: none;
+            letter-spacing: -0.5px;
+        }
+        .navbar .brand span { color: #f72585; }
+        .navbar .nav-links { display: flex; gap: 32px; align-items: center; }
+        .navbar .nav-links a { color: #aaa; text-decoration: none; font-size: 14px; transition: color 0.2s; }
+        .navbar .nav-links a:hover { color: #fff; }
+        
+        /* Hero */
+        .hero {
+            padding: 180px 48px 120px;
+            text-align: center;
+            background: radial-gradient(ellipse at 50% 0%, #1a1a2e 0%, #0a0a1a 80%);
+            position: relative;
+            overflow: hidden;
+        }
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            width: 800px; height: 800px;
+            background: radial-gradient(circle, rgba(76,201,240,0.08) 0%, transparent 70%);
+            transform: translate(-50%, -50%);
+        }
+        .hero h1 {
+            font-size: 56px;
+            margin-bottom: 24px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            position: relative;
+        }
+        .hero h1 span {
+            background: linear-gradient(135deg, #4cc9f0, #f72585);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero .tagline {
+            font-size: 22px;
+            color: #888;
+            margin-bottom: 12px;
+            position: relative;
+        }
+        .hero .subtitle {
+            font-size: 16px;
+            color: #666;
+            max-width: 600px;
+            margin: 0 auto 48px;
+            position: relative;
+        }
+        
+        /* 项目介绍 */
+        .about {
+            padding: 100px 48px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .about h2 {
+            font-size: 36px;
+            margin-bottom: 32px;
+            text-align: center;
+        }
+        .about .content {
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 48px;
+            border: 1px solid #2a2a4a;
+        }
+        .about p {
+            color: #aaa;
+            font-size: 16px;
+            margin-bottom: 20px;
+            line-height: 1.8;
+        }
+        .about ul {
+            color: #aaa;
+            margin-left: 24px;
+            margin-bottom: 20px;
+        }
+        .about li {
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+        
+        /* 架构图 */
+        .architecture {
+            padding: 100px 48px;
+            background: #1a1a2e;
+        }
+        .architecture h2 {
+            text-align: center;
+            font-size: 36px;
+            margin-bottom: 16px;
+        }
+        .section-subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 64px;
+            font-size: 16px;
+        }
+        .arch-diagram {
+            max-width: 800px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-rows: repeat(3, 1fr);
+            gap: 20px;
+        }
+        .arch-layer {
+            background: #0a0a1a;
+            border-radius: 12px;
+            padding: 28px;
+            border: 1px solid #2a2a4a;
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+        .arch-layer.decision { border-left: 4px solid #f72585; }
+        .arch-layer.management { border-left: 4px solid #4cc9f0; }
+        .arch-layer.execution { border-left: 4px solid #4ade80; }
+        .arch-layer .layer-label {
+            writing-mode: vertical-rl;
+            font-size: 10px;
+            color: #555;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+        .arch-layer .layer-content h3 {
+            font-size: 18px;
+            margin-bottom: 6px;
+        }
+        .arch-layer.decision .layer-content h3 { color: #f72585; }
+        .arch-layer.management .layer-content h3 { color: #4cc9f0; }
+        .arch-layer.execution .layer-content h3 { color: #4ade80; }
+        .arch-layer .layer-content p { color: #888; font-size: 13px; }
+        .arch-layer .agents { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .arch-layer .agent-tag {
+            background: rgba(76,201,240,0.08);
+            color: #aaa;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+        }
+        
+        /* 功能模块 */
+        .features {
+            padding: 100px 48px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        .features h2 { text-align: center; font-size: 36px; margin-bottom: 64px; }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+        }
+        .feature-card {
+            background: #1a1a2e;
+            border-radius: 12px;
+            padding: 28px;
+            border: 1px solid #2a2a4a;
+        }
+        .feature-card h3 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            color: #4cc9f0;
+        }
+        .feature-card p { color: #888; font-size: 14px; line-height: 1.6; }
+        .feature-card .tech {
+            margin-top: 16px;
+            font-size: 12px;
+            color: #666;
+        }
+        .feature-card .tech span {
+            background: #0a0a1a;
+            padding: 4px 10px;
+            border-radius: 4px;
+            margin-right: 8px;
+        }
+        
+        /* 代码示例 */
+        .code-section {
+            padding: 100px 48px;
+            background: #1a1a2e;
+        }
+        .code-section h2 {
+            text-align: center;
+            font-size: 36px;
+            margin-bottom: 16px;
+        }
+        .code-section .section-subtitle {
+            margin-bottom: 48px;
+        }
+        .code-block {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #0a0a1a;
+            border-radius: 12px;
+            padding: 24px;
+            border: 1px solid #2a2a4a;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            color: #aaa;
+            overflow-x: auto;
+        }
+        .code-block .comment { color: #6a9955; }
+        .code-block .keyword { color: #569cd6; }
+        .code-block .string { color: #ce9178; }
+        .code-block .function { color: #dcdcaa; }
+        
+        /* GitHub链接 */
+        .github-section {
+            padding: 100px 48px;
+            text-align: center;
+        }
+        .github-section h2 { font-size: 36px; margin-bottom: 16px; }
+        .github-section p { color: #888; margin-bottom: 32px; font-size: 16px; }
+        .github-section a {
+            display: inline-block;
+            background: linear-gradient(135deg, #4cc9f0, #4361ee);
+            color: #000;
+            padding: 16px 48px;
+            border-radius: 10px;
+            text-decoration: none;
+            font-weight: 700;
+            font-size: 16px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .github-section a:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 8px 30px rgba(76,201,240,0.3); 
+        }
+        
+        /* Footer */
+        .footer {
+            padding: 48px;
+            text-align: center;
+            color: #555;
+            border-top: 1px solid #1a1a2e;
+            font-size: 13px;
+        }
+        .footer a { color: #777; text-decoration: none; }
+        .footer a:hover { color: #4cc9f0; }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .navbar { padding: 12px 20px; }
+            .navbar .nav-links { display: none; }
+            .hero { padding: 140px 24px 80px; }
+            .hero h1 { font-size: 36px; }
+            .about { padding: 60px 24px; }
+            .about .content { padding: 32px 24px; }
+            .features-grid { grid-template-columns: 1fr; }
+            .arch-layer { flex-direction: column; gap: 12px; }
+            .arch-layer .layer-label { writing-mode: horizontal-tb; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- 导航 -->
+<div class="navbar">
+    <a href="/" class="brand">AI<span>_</span>OS</a>
+    <div class="nav-links">
+        <a href="#about">项目介绍</a>
+        <a href="#architecture">技术架构</a>
+        <a href="#features">功能模块</a>
+        <a href="#code">代码示例</a>
+        <a href="https://github.com/minren755/AI_OS" target="_blank">GitHub</a>
+    </div>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+    <h1>让AI像团队一样<span>协作</span></h1>
+    <p class="tagline">多Agent协作技术验证项目</p>
+    <p class="subtitle">
+        探索如何让多个AI Agent像团队一样协作完成任务<br>
+        技术学习 · 开源分享 · 交流讨论
+    </p>
+</div>
+
+<!-- 项目介绍 -->
+<div class="about" id="about">
+    <h2>关于本项目</h2>
+    <div class="content">
+        <p>
+            <strong>AI_OS</strong>是一个个人技术验证项目，用于探索多Agent协作的可能性。
+            项目基于LangGraph框架开发，尝试实现"决策层→管理层→执行层"三层协作架构。
+        </p>
+        
+        <p><strong>项目背景：</strong></p>
+        <ul>
+            <li>当前主流AI应用多为单Agent模式，面对复杂任务时能力有限</li>
+            <li>多Agent协作是AI领域的重要研究方向，但实际落地的开源项目较少</li>
+            <li>本项目作为个人学习和技术验证，探索多Agent协作的实现方式</li>
+        </ul>
+        
+        <p><strong>核心思路：</strong></p>
+        <ul>
+            <li><strong>决策层</strong>：多个Agent围绕议题讨论，达成共识后输出决策</li>
+            <li><strong>管理层</strong>：PM Agent将决策拆解为具体任务，分配执行Agent</li>
+            <li><strong>执行层</strong>：各Agent使用工具（terminal/write_file/execute_code）完成实际工作</li>
+        </ul>
+        
+        <p><strong>技术栈：</strong></p>
+        <ul>
+            <li>LangGraph - 状态机流程编排</li>
+            <li>Flask - Web界面</li>
+            <li>SQLite - 数据存储</li>
+            <li>Tencent GLM API - LLM推理</li>
+        </ul>
+        
+        <p style="margin-top: 24px; color: #666; font-size: 14px;">
+            注：本项目仅用于技术验证和学习交流，不提供任何商业服务。
+        </p>
+    </div>
+</div>
+
+<!-- 技术架构 -->
+<div class="architecture" id="architecture">
+    <h2>三层架构</h2>
+    <p class="section-subtitle">模仿团队协作：决策层定方向，管理层拆任务，执行层干活</p>
+    
+    <div class="arch-diagram">
+        <div class="arch-layer decision">
+            <div class="layer-label">DECISION</div>
+            <div class="layer-content">
+                <h3>决策层 · DiscussionEngine</h3>
+                <p>多Agent围绕议题讨论，动态发言队列，共识检测，输出决策结论</p>
+                <div class="agents">
+                    <span class="agent-tag">CEO 战略视角</span>
+                    <span class="agent-tag">CFO 财务视角</span>
+                    <span class="agent-tag">CTO 技术视角</span>
+                    <span class="agent-tag">CMO 市场视角</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arch-layer management">
+            <div class="layer-label">MANAGEMENT</div>
+            <div class="layer-content">
+                <h3>管理层 · WorkflowEngine</h3>
+                <p>两阶段任务拆解（模块→任务），智能依赖推断，进度追踪</p>
+                <div class="agents">
+                    <span class="agent-tag">PM 任务拆解</span>
+                    <span class="agent-tag">依赖推断</span>
+                    <span class="agent-tag">进度追踪</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="arch-layer execution">
+            <div class="layer-label">EXECUTION</div>
+            <div class="layer-content">
+                <h3>执行层 · ToolExecutor</h3>
+                <p>每个Agent有专属工具，真正执行：写代码、生成设计、测试验证</p>
+                <div class="agents">
+                    <span class="agent-tag">Developer 写代码</span>
+                    <span class="agent-tag">Designer 生成设计</span>
+                    <span class="agent-tag">QA 测试验证</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 功能模块 -->
+<div class="features" id="features">
+    <h2>已实现功能</h2>
+    
+    <div class="features-grid">
+        <div class="feature-card">
+            <h3>💬 动态发言队列</h3>
+            <p>Agent可在回复中指定下一轮谁发言，讨论流程可控、不混乱。避免传统多Agent"同时发言、各说各话"的问题。</p>
+            <div class="tech">
+                <span>LangGraph</span>
+                <span>StateGraph</span>
+            </div>
+        </div>
+        
+        <div class="feature-card">
+            <h3>✅ 共识检测</h3>
+            <p>每轮发言后检测是否达成共识，共识格式统一，避免无休止讨论。支持Agent主动声明"跳过"。</p>
+            <div class="tech">
+                <span>正则匹配</span>
+                <span>结构化输出</span>
+            </div>
+        </div>
+        
+        <div class="feature-card">
+            <h3>📝 两阶段任务拆解</h3>
+            <p>PM先拆大模块（做什么），再拆每模块的子任务（怎么做），任务粒度更可控。</p>
+            <div class="tech">
+                <span>JSON解析</span>
+                <span>fallback机制</span>
+            </div>
+        </div>
+        
+        <div class="feature-card">
+            <h3>🔗 智能依赖推断</h3>
+            <p>基于任务描述自动推断依赖关系："读取X文件" → "依赖创建X的任务"。</p>
+            <div class="tech">
+                <span>关键词匹配</span>
+                <span>规则引擎</span>
+            </div>
+        </div>
+        
+        <div class="feature-card">
+            <h3>🛠️ 真实工具执行</h3>
+            <p>执行层调用真实工具：terminal执行命令、write_file写文件、execute_code运行Python。</p>
+            <div class="tech">
+                <span>asyncio</span>
+                <span>PIL</span>
+            </div>
+        </div>
+        
+        <div class="feature-card">
+            <h3>🎨 PIL图片生成</h3>
+            <p>Designer Agent使用PIL生成设计图，无需外部API，输出真实PNG文件。</p>
+            <div class="tech">
+                <span>PIL.Image</span>
+                <span>中文字体</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 代码示例 -->
+<div class="code-section" id="code">
+    <h2>代码示例</h2>
+    <p class="section-subtitle">DiscussionEngine核心逻辑</p>
+    
+    <div class="code-block">
+<span class="comment"># 动态发言队列</span>
+<span class="keyword">async def</span> <span class="function">run_discussion</span>(self, topic):
+    <span class="keyword">while</span> <span class="keyword">not</span> self._check_consensus():
+        speaker = self.speaker_queue.pop(0)
+        response = <span class="keyword">await</span> self._call_llm(speaker, topic)
+        
+        <span class="comment"># 解析下一轮发言者</span>
+        next_speaker = self._parse_next_speaker(response)
+        <span class="keyword">if</span> next_speaker:
+            self.speaker_queue.append(next_speaker)
+        <span class="keyword">else</span>:
+            <span class="comment"># 默认轮询</span>
+            self.speaker_queue.append(self._next_agent(speaker))
+    
+    <span class="keyword">return</span> self._summarize()
+    </div>
+</div>
+
+<!-- GitHub -->
+<div class="github-section">
+    <h2>开源代码</h2>
+    <p>项目完整代码已在GitHub开源，欢迎交流讨论</p>
+    <a href="https://github.com/minren755/AI_OS" target="_blank">查看源码</a>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>
+        <a href="https://aicreator.ren">aicreator.ren</a> · 
+        <a href="https://github.com/minren755/AI_OS" target="_blank">GitHub</a>
+    </p>
+    <p style="margin-top: 12px;">
+        本站仅用于技术验证和学习交流，不提供任何商业服务
+    </p>
+</div>
+
+</body>
+</html>
