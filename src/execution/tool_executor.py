@@ -179,8 +179,25 @@ class ToolExecutor:
             
             # 生成设计图
             try:
-                font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 18)
-                title_font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 32)
+                # 使用支持中文的字体（macOS）
+                font_paths = [
+                    "/System/Library/Fonts/PingFang.ttc",
+                    "/System/Library/Fonts/STHeiti Light.ttc", 
+                    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+                    "/System/Library/Fonts/Supplemental/Songti.ttc"
+                ]
+                font = None
+                title_font = None
+                for fp in font_paths:
+                    try:
+                        font = ImageFont.truetype(fp, 18)
+                        title_font = ImageFont.truetype(fp, 32)
+                        break
+                    except:
+                        continue
+                if not font:
+                    font = ImageFont.load_default()
+                    title_font = font
             except:
                 font = ImageFont.load_default()
                 title_font = font
