@@ -18,13 +18,26 @@ from execution.agents import (
     Task, TaskStatus, ToolResult
 )
 from execution.dependency_inferrer import infer_dependencies
+from execution.tool_executor import ToolExecutor
 
 
 class WorkflowEngine:
     """三层编排引擎"""
     
-    def __init__(self, tool_executor: Callable = None):
-        self.tool_executor = tool_executor or self._default_tool_executor
+    def __init__(self, workdir: str = None, dry_run: bool = False, tool_executor: Callable = None):
+        # 工具执行器
+        self.executor = ToolExecutor(workdir=workdir, dry_run=dry_run)
+        
+        # 适配器：将ToolExecutor包装成Agent需要的格式
+        async def tool_adapter(action: str, params: dict) -> ToolResult:
+            result = await self.executor.execute(action, params)
+            return ToolResult(
+                success=result["success"],
+                output=result["output"],
+                error=result["error"]
+            )
+        
+        self.tool_executor = tool_executor or tool_adapter
         
         # 决策层
         self.decision_agents = {
@@ -37,12 +50,12 @@ class WorkflowEngine:
         # 管理层
         self.pm = PMAgent()
         
-        # 执行层
+        # 执行层（注入真实工具执行器）
         self.execution_agents = {
-            "Developer": DeveloperAgent(tool_executor),
-            "Designer": DesignerAgent(tool_executor),
-            "QA": QAAgent(tool_executor),
-            "Operator": OperatorAgent(tool_executor),
+            "Developer": DeveloperAgent(self.tool_executor),
+            "Designer": DesignerAgent(self.tool_executor),
+            "QA": QAAgent(self.tool_executor),
+            "Operator": OperatorAgent(self.tool_executor),
         }
         
         # PM注册执行Agent
@@ -56,6 +69,8 @@ class WorkflowEngine:
         # 工作流状态
         self.workflow_log: List[Dict] = []
         self.on_event: Callable = None
+        self.workdir = workdir
+        self.dry_run = dry_run
     
     def _init_llm_configs(self):
         """加载LLM配置"""
@@ -495,11 +510,6 @@ class WorkflowEngine:
         except Exception as e:
             print(f"LLM调用失败: {e}")
             return ""
-    
-    async def _default_tool_executor(self, action: str, params: dict) -> ToolResult:
-        """默认工具执行器（不执行真实操作，只记录）"""
-        self._emit("tool_call", {"action": action, "params": str(params)[:200]})
-        return ToolResult(success=True, output=f"[Dry Run] {action}")
     
     def _emit(self, event_type: str, data: Dict):
         """发送事件"""
