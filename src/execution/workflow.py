@@ -78,6 +78,7 @@ class WorkflowEngine:
         self.pending_questions: List[str] = []
         self.user_responses: List[str] = []
         self.original_topic: str = ""
+        self._skip_info_check: bool = False
     
     def _init_llm_configs(self):
         """加载LLM配置"""
@@ -94,23 +95,32 @@ class WorkflowEngine:
         self._emit("workflow_start", {"topic": topic})
         
         # ===== 方案B：信息完整性检查 =====
-        info_check = check_and_ask(topic)
-        if info_check["need_input"]:
-            self.waiting_for_input = True
-            self.original_topic = topic
-            self.pending_questions = info_check["questions"]
-            
-            self._emit("need_input", {
-                "questions": info_check["questions"],
-                "prompt": info_check["prompt"],
-                "missing": info_check["missing"]
-            })
-            
-            return {
-                "状态": "等待用户输入",
-                "问题": info_check["questions"],
-                "提示": info_check["prompt"]
-            }
+        if not self._skip_info_check:
+            info_check = check_and_ask(topic)
+            if info_check["need_input"]:
+                self.waiting_for_input = True
+                self.original_topic = topic
+                self.pending_questions = info_check["questions"]
+                
+                self._emit("need_input", {
+                    "questions": info_check["questions"],
+                    "prompt": info_check["prompt"],
+                    "missing": info_check["missing"]
+                })
+                
+                return {
+                    "状态": "等待用户输入",
+                    "问题": info_check["questions"],
+                    "提示": info_check["prompt"]
+                }
+        
+        # 重置标志
+        self._skip_info_check = False
+        
+        return await self._execute_workflow(topic)
+    
+    async def _execute_workflow(self, topic: str) -> Dict:
+        """执行工作流（跳过信息检查）"""
         
         # ========== Phase 1: 决策层讨论 ==========
         self._emit("phase", {"phase": "decision", "message": "决策层讨论中..."})
@@ -163,8 +173,11 @@ class WorkflowEngine:
         self.waiting_for_input = False
         self._emit("input_received", {"input": user_input})
         
-        # 继续执行工作流
-        return await self.run(enhanced_topic)
+        # 标记已补充信息，跳过下次检查
+        self._skip_info_check = True
+        
+        # 继续执行工作流（跳过信息检查）
+        return await self._execute_workflow(enhanced_topic)
     
     # ========== Phase 1: 决策层讨论 ==========
     
