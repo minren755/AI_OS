@@ -17,6 +17,7 @@ from execution.agents import (
     DesignerAgent, QAAgent, OperatorAgent,
     Task, TaskStatus, ToolResult
 )
+from execution.dependency_inferrer import infer_dependencies
 
 
 class WorkflowEngine:
@@ -226,6 +227,9 @@ class WorkflowEngine:
         if not tasks:
             # fallback默认任务
             tasks = self._default_module_tasks(module)
+        
+        # P1: 智能依赖推断
+        tasks = infer_dependencies(tasks)
         
         return tasks
     
